@@ -1,12 +1,15 @@
-# Catalogue Service (stateless). Namespace `shop`.
-# Trước khi apply: thay DOCKERHUB_USER bằng tài khoản Docker Hub chung của nhóm, ví dụ
-#   sed -i 's#DOCKERHUB_USER#tenaccount#' k8s/deployment.yaml
-# Yêu cầu có sẵn: namespace `shop`, Secret `postgres-secret` (TV3), Service `postgres-service` (TV3).
+# Catalogue Service (stateless): Deployment + Service. Namespace `default`, giống các file khác trong thư mục k8s/.
+#
+# Điều kiện: k8s/database-statefulset.yaml (TV3) đã được apply, Service `postgres-service` đã chạy.
+# Trước khi apply: thay DOCKERHUB_USER bằng nơi chứa image của nhóm, ví dụ
+#   Docker Hub:  <tai-khoan>/catalogue-service:v0.1
+#   GHCR:        ghcr.io/<owner-viet-thuong>/catalogue-service:v0.1
+# Test local không cần registry: xem catalogue-service/README.md mục 7 (minikube image load).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: catalogue-service
-  namespace: shop
+  namespace: default
   labels:
     app: catalogue-service
 spec:
@@ -17,14 +20,14 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 0   # Zero Downtime: không bao giờ bớt Pod cũ trước khi Pod mới Ready
+      maxUnavailable: 0   # Zero Downtime: không bớt Pod cũ trước khi Pod mới Ready
       maxSurge: 1
   template:
     metadata:
       labels:
         app: catalogue-service
       annotations:
-        # Dùng cho Prometheus cấu hình kiểu annotation; ServiceMonitor (TV4) chọn theo label của Service.
+        # Cho Prometheus cấu hình kiểu annotation; ServiceMonitor chọn theo label của Service bên dưới.
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: "8001"
@@ -45,25 +48,20 @@ spec:
               value: "8001"
             - name: LOG_LEVEL
               value: "info"
+            # Các giá trị DB dưới đây PHẢI khớp k8s/database-statefulset.yaml của TV3
+            # (POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD / tên Service).
             - name: DB_HOST
               value: "postgres-service"
             - name: DB_PORT
               value: "5432"
             - name: DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_DB
+              value: "catalogue_db"
             - name: DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
+              value: "postgres"
+            # TODO (TV2 + TV3): mật khẩu đang để thẳng trong YAML, giống cách TV3 đang làm.
+            # Khi TV3 chuyển sang Kubernetes Secret thì đổi thành secretKeyRef ở đây.
             - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
+              value: "postgres123"
           resources:
             # requests là BẮT BUỘC: HPA tính % CPU dựa trên giá trị này.
             requests:
@@ -72,7 +70,7 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
-          # Khởi động chậm khi DB chưa sẵn sàng (service tự retry tới 60 giây) nên cần startupProbe.
+          # Service chờ DB tối đa 60 giây khi khởi động nên cần startupProbe.
           startupProbe:
             httpGet:
               path: /health
@@ -81,7 +79,7 @@ spec:
             failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /health      # không chạm DB: mất DB không làm Pod bị restart
+              path: /health      # không chạm DB: mất DB thì Pod không bị restart
               port: http
             periodSeconds: 10
             timeoutSeconds: 2
@@ -93,3 +91,21 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 2
             failureThreshold: 2
+---
+# Chỉ truy cập nội bộ trong cụm (ClusterIP). KHÔNG đưa catalogue-service ra Ingress:
+# k8s/ingress.yaml chỉ trỏ vào api-service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue-service
+  namespace: default
+  labels:
+    app: catalogue-service   # ServiceMonitor của TV4 chọn theo label này
+spec:
+  type: ClusterIP
+  selector:
+    app: catalogue-service
+  ports:
+    - name: http             # tên port `http` để ServiceMonitor chọn đúng
+      port: 8001
+      targetPort: http

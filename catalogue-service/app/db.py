@@ -12,20 +12,20 @@ from .config import settings
 
 log = logging.getLogger("catalogue.db")
 
-# Schema do catalogue-service tự tạo (TV3 không cần quản lý migration).
+# Schema GIỐNG HỆT k8s/init.sql của TV3 (bảng do TV3 sở hữu).
+# Trên K8s và trong docker-compose, init.sql chạy trước nên câu lệnh này không làm gì.
+# Nó chỉ là phương án dự phòng khi chạy catalogue với một PostgreSQL trống.
 SCHEMA_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS products (
-        id          SERIAL PRIMARY KEY,
-        name        VARCHAR(255)  NOT NULL,
-        price       NUMERIC(12,2) NOT NULL CHECK (price >= 0),
-        description TEXT          DEFAULT '',
-        stock       INTEGER       NOT NULL DEFAULT 0 CHECK (stock >= 0),
-        created_at  TIMESTAMPTZ   NOT NULL DEFAULT now(),
-        updated_at  TIMESTAMPTZ   NOT NULL DEFAULT now()
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        price NUMERIC(10, 2) NOT NULL,
+        stock INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    "CREATE INDEX IF NOT EXISTS idx_products_name ON products (name)",
 ]
 
 # Khóa advisory để nhiều replica khởi động cùng lúc không tranh nhau tạo bảng.
@@ -131,8 +131,8 @@ def update_product(
     assert pool is not None
     with pool.connection() as conn:
         row = conn.execute(
-            f"UPDATE products SET name = %s, description = %s, price = %s, stock = %s, "
-            f"updated_at = now() WHERE id = %s RETURNING {_COLUMNS}",
+            f"UPDATE products SET name = %s, description = %s, price = %s, stock = %s "
+            f"WHERE id = %s RETURNING {_COLUMNS}",
             (name, description, price, stock, product_id),
         ).fetchone()
     return _row(row) if row else None

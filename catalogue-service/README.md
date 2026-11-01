@@ -1,60 +1,48 @@
 # Catalogue Service (TV2)
 
-CRUD danh mục sản phẩm, port **8001**, FastAPI + PostgreSQL. Tuân theo `docs/contract.md` (API Contract v1.1).
+CRUD danh mục sản phẩm, port **8001**, FastAPI + PostgreSQL. Tuân theo `api-service/API_CONTRACT.md` (TV1). Cấu hình khớp với `k8s/database-statefulset.yaml` (TV3) và `k8s/ingress.yaml`, `k8s/hpa.yaml` (TV4).
 
-## 1. Trạng thái bàn giao
+## 1. Cấu trúc thư mục
 
-| Hạng mục | Trạng thái |
-|---|---|
-| Code CRUD, `/health`, `/ready`, `/metrics` | Đã viết, **chưa chạy thử end-to-end** (xem mục 2) |
-| Dockerfile (non-root, python:3.12-slim) | Đã viết, chưa build thử |
-| `docker-compose.yml` (ở thư mục gốc repo) | Đã viết, chưa chạy thử |
-| `k8s/deployment.yaml`, `service.yaml`, `hpa.yaml` | Đã viết, YAML hợp lệ, chưa apply lên cụm |
-| `scripts/seed.py` (500 sản phẩm) | Đã viết, chưa chạy thử |
-| `scripts/smoke_test.sh` | Đã viết, chạy sau khi service lên |
-
-## 2. Việc đầu tiên cần làm (10 phút): chạy thử và đẩy image v0.1
-
-Code được viết trong môi trường không có Docker, FastAPI hay PostgreSQL nên chưa có lần chạy thật. Hãy chạy theo thứ tự:
-
-```bash
-# 1. Chạy cả DB và service ở local (thư mục gốc repo)
-docker compose up --build -d
-
-# 2. Kiểm tra toàn bộ endpoint, mã lỗi, metrics (mọi dòng phải [OK])
-./catalogue-service/scripts/smoke_test.sh
-
-# 3. Nạp 500 sản phẩm mẫu
-docker compose exec catalogue-service python scripts/seed.py --count 500 --reset
-
-# 4. Build và đẩy image cho TV3/TV4 kéo về dùng
-docker build -t <dockerhub-user>/catalogue-service:v0.1 ./catalogue-service
-docker push <dockerhub-user>/catalogue-service:v0.1
-docker tag  <dockerhub-user>/catalogue-service:v0.1 <dockerhub-user>/catalogue-service:latest
-docker push <dockerhub-user>/catalogue-service:latest
+```
+catalogue-service/
+├── app/            # config.py, db.py, schemas.py, metrics.py, main.py
+├── scripts/        # seed.py (nạp dữ liệu mẫu), smoke_test.sh (kiểm tra nhanh)
+├── Dockerfile
+├── requirements.txt
+└── README.md
+k8s/catalogue-deployment.yaml   # Deployment + Service của catalogue
+k8s/catalogue-hpa.yaml          # HPA của catalogue
+docker-compose.yml              # chạy local ở thư mục gốc repo
 ```
 
-Nếu `smoke_test.sh` có dòng `[FAIL]`, sửa trước khi báo cho các bạn khác.
+## 2. Chạy thử ở máy local
+
+```bash
+docker compose up --build -d                       # ở thư mục gốc repo
+bash catalogue-service/scripts/smoke_test.sh        # mọi dòng phải [OK] (cần bash: Git Bash hoặc WSL)
+docker compose exec catalogue-service python scripts/seed.py --count 500 --reset
+docker compose down -v                              # dọn sạch, kể cả dữ liệu
+```
+
+Compose dùng đúng `postgres:15-alpine`, DB `catalogue_db` và nạp `k8s/init.sql` của TV3, nên schema giống hệt trên cụm.
 
 ## 3. Biến môi trường
 
 | Biến | Mặc định | Ghi chú |
 |---|---|---|
 | `PORT` | `8001` | |
-| `DB_HOST` | `postgres-service` | tên Service của DB |
+| `DB_HOST` | `postgres-service` | Service của TV3 |
 | `DB_PORT` | `5432` | |
-| `DB_NAME` | `shopdb` | K8s: lấy từ Secret `postgres-secret`, key `POSTGRES_DB` |
-| `DB_USER` | `shop` | K8s: key `POSTGRES_USER` |
-| `DB_PASSWORD` | (rỗng) | K8s: key `POSTGRES_PASSWORD` |
+| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `catalogue_db` / `postgres` / (rỗng) | Phải khớp `POSTGRES_*` trong `database-statefulset.yaml` |
 | `LOG_LEVEL` | `info` | |
-| `DB_POOL_MIN` / `DB_POOL_MAX` | `2` / `10` | số kết nối mỗi Pod; 8 Pod x 10 = 80, dưới giới hạn 100 của PostgreSQL |
-| `DB_POOL_TIMEOUT_SECONDS` | `5` | |
-| `DB_CONNECT_RETRIES` / `DB_CONNECT_DELAY_SECONDS` | `30` / `2` | chờ DB tối đa 60 giây khi khởi động |
-| `DEFAULT_LIMIT` / `MAX_LIMIT` | `100` / `1000` | phân trang của `GET /products` |
+| `DB_POOL_MIN` / `DB_POOL_MAX` | `1` / `8` | Mỗi Pod tối đa 8 kết nối. HPA max 10 Pod = 80, dưới `max_connections=100` của PostgreSQL |
+| `DB_CONNECT_RETRIES` / `DB_CONNECT_DELAY_SECONDS` | `30` / `2` | Chờ DB tối đa 60 giây khi khởi động |
+| `DEFAULT_LIMIT` / `MAX_LIMIT` | `100` / `1000` | Phân trang của `GET /products` |
 
 ## 4. Endpoint
 
-| Method | Path | Thành công | Lỗi có thể gặp |
+| Method | Path | Thành công | Lỗi |
 |---|---|---|---|
 | GET | `/health` | 200 `{"status":"ok","service":"catalogue-service"}` | |
 | GET | `/ready` | 200 | 503 khi mất DB |
@@ -63,89 +51,65 @@ Nếu `smoke_test.sh` có dòng `[FAIL]`, sửa trước khi báo cho các bạn
 | GET | `/products/{id}` | 200 | 404, 422 |
 | POST | `/products` | 201 | 422 |
 | PUT | `/products/{id}` | 200 | 404, 422 |
-| DELETE | `/products/{id}` | 204 (không có body) | 404 |
+| DELETE | `/products/{id}` | **204, không có body** | 404 |
 
-- Product: `id`, `name`, `description` (có thể `null`), `price`, `stock`. `created_at`/`updated_at` có trong DB nhưng chưa trả về ở v1.x.
-- `GET /products` trả mảng thuần (đúng contract). Tổng số bản ghi nằm ở header **`X-Total-Count`**. Mặc định `limit=100`, tối đa `1000`.
-- Mọi lỗi có dạng `{"detail": "<thông báo>"}`. Lỗi không lường trước trả `500`.
+- Product: `id`, `name` (1 đến 255 ký tự), `description` (có thể `null`), `price` (0 đến 99.999.999,99), `stock` (>= 0).
+- `GET /products` trả mảng thuần như contract. Tổng số bản ghi ở header `X-Total-Count`.
+- Mọi lỗi có dạng `{"detail": "<thông báo>"}`. Lỗi không lường trước trả 500. Catalogue không tự sinh 502/503/504 (trừ `/ready`), đó là mã của api-service.
 
-```bash
-curl -s -X POST localhost:8001/products -H 'Content-Type: application/json' \
-  -d '{"name":"Laptop Dell XPS 15","description":"Laptop cao cấp","price":1500,"stock":10}'
-curl -s "localhost:8001/products?limit=5"
-curl -s -X DELETE localhost:8001/products/1 -i
-```
+## 5. Metrics (cùng quy ước với api-service)
 
-## 5. Health, readiness và vì sao tách đôi
+`GET /metrics` cùng port 8001, tên metric và nhãn giống `API_CONTRACT.md` mục 8:
 
-- `/health` (liveness): chỉ kiểm tra tiến trình, **không chạm DB**. DB sập thì Pod không bị restart hàng loạt.
-- `/ready` (readiness): có `SELECT 1`. DB sập thì Pod bị rút khỏi Service (api-service nhận 503/504 nhanh, không đợi timeout), DB lên lại thì tự vào lại.
-- Có `startupProbe` vì lúc khởi động service đợi DB tối đa 60 giây.
-
-## 6. Metrics
-
-`GET /metrics` cùng port 8001:
-
-| Metric | Loại | Label |
+| Metric | Loại | Nhãn |
 |---|---|---|
-| `http_requests_total` | Counter | `method`, `path`, `status` |
-| `http_request_duration_seconds` | Histogram (bucket 5ms đến 5s) | `method`, `path` |
-| `http_requests_in_progress` | Gauge | `method` |
-| `process_cpu_seconds_total`, `process_resident_memory_bytes`, ... | mặc định của thư viện | |
+| `http_requests_total` | Counter | `method`, `route`, `status_code` |
+| `http_request_duration_seconds` | Histogram (bucket mặc định) | `method`, `route`, `status_code` |
+| `http_request_errors_total` | Counter, status >= 400 | `method`, `route`, `status_code` |
 
-- `path` là **mẫu route**: `/products` và `/products/{product_id}` (không phải id thật).
-- `/health`, `/ready`, `/metrics` không bị đếm.
+- `route` là mẫu route: `/products` hoặc `/products/{product_id}`, không phải id thật.
+- Catalogue **không đếm** `/metrics`, `/health`, `/ready` (để request của kubelet không làm nhiễu số liệu). api-service hiện chỉ loại `/metrics`, nên nên loại thêm hai endpoint kia để hai bên nhất quán.
 
-## 7. Triển khai Kubernetes
-
-```bash
-# Điều kiện: namespace shop, Secret postgres-secret và Service postgres-service của TV3 đã có
-sed -i 's#DOCKERHUB_USER#<dockerhub-user>#' catalogue-service/k8s/deployment.yaml
-kubectl apply -f catalogue-service/k8s/deployment.yaml -f catalogue-service/k8s/service.yaml
-kubectl -n shop rollout status deploy/catalogue-service
-
-# HPA cần Metrics Server (TV4). Kiểm tra: kubectl top pods -n shop
-kubectl apply -f catalogue-service/k8s/hpa.yaml
-
-# Nạp dữ liệu mẫu bên trong cụm
-kubectl -n shop exec deploy/catalogue-service -- python scripts/seed.py --count 500 --reset
-```
-
-Nếu TV3 chưa có Secret, tạo tạm để test:
+## 6. Kubernetes (namespace `default`, như các file khác trong `k8s/`)
 
 ```bash
-kubectl -n shop create secret generic postgres-secret \
-  --from-literal=POSTGRES_DB=shopdb --from-literal=POSTGRES_USER=shop \
-  --from-literal=POSTGRES_PASSWORD='<mat-khau-tu-dat>'
+kubectl apply -f k8s/database-statefulset.yaml     # TV3
+sed -i 's#DOCKERHUB_USER#<noi-chua-image>#' k8s/catalogue-deployment.yaml   # xem ghi chú bên dưới
+kubectl apply -f k8s/catalogue-deployment.yaml
+kubectl rollout status deploy/catalogue-service
+kubectl apply -f k8s/catalogue-hpa.yaml            # cần Metrics Server (TV4)
+kubectl exec deploy/catalogue-service -- python scripts/seed.py --count 500 --reset
 ```
 
-## 8. Bàn giao cho từng thành viên
+- Image: `DOCKERHUB_USER/catalogue-service:v0.1` là chỗ giữ chỗ. Docker Hub: `<tai-khoan>/catalogue-service:v0.1`. GHCR: `ghcr.io/<owner-viet-thuong>/catalogue-service:v0.1`.
+- Test không cần registry: `docker build -t catalogue-service:test ./catalogue-service` rồi `minikube image load catalogue-service:test`, và dùng `sed` đổi tên image thành `catalogue-service:test` trên đường ống `kubectl apply -f -`, không sửa file.
+- Mật khẩu DB đang nằm thẳng trong `catalogue-deployment.yaml` vì `database-statefulset.yaml` cũng làm vậy. Khi TV3 chuyển sang Secret thì đổi `DB_PASSWORD` (và `DB_USER`, `DB_NAME`) sang `secretKeyRef`.
 
-### TV1 – api-service
-- Địa chỉ gọi: `http://catalogue-service:8001` (K8s), `http://127.0.0.1:8001` (local, `docker compose up`).
-- Danh sách trả về là **mảng JSON**; đọc `X-Total-Count` nếu cần tổng số.
-- `DELETE` trả **204 không body**: api-service phải chuyển tiếp đúng (đừng cố parse JSON).
-- Catalogue không bao giờ trả 503/504 cho nghiệp vụ; 503/504 là mã **api-service tự sinh** khi không kết nối được hoặc quá timeout 3 giây.
-- Có thể chạy `docker compose up postgres-service catalogue-service` để có catalogue thật mà không cần mock.
+## 7. Thông tin bàn giao
 
-### TV3 – database và load test
-- Catalogue cần: Service `postgres-service:5432`, Secret `postgres-secret` với 3 key `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, namespace `shop`.
-- **Không cần init.sql**: catalogue tự `CREATE TABLE IF NOT EXISTS` khi khởi động, an toàn khi nhiều Pod khởi động cùng lúc (advisory lock).
-- PostgreSQL mặc định `max_connections=100`; mỗi Pod catalogue giữ tối đa 10 kết nối. Nếu HPA lên 8 Pod là 80 kết nối, đừng hạ `max_connections`.
-- Nạp dữ liệu: lệnh seed ở mục 7. Dùng `--reset` để id luôn là 1..N, khớp với script tải chọn id ngẫu nhiên 1..500. Lưu ý `--reset` xóa sạch dữ liệu.
-- Endpoint cho script tải: xem docs/contract.md mục 13.
+### TV1 (api-service)
+- Gọi catalogue qua `CATALOGUE_BASE_URL=http://catalogue-service:8001` (cùng namespace `default`). Local: `http://127.0.0.1:8001`.
+- Catalogue trả mảng JSON cho `GET /products`, đúng cấu trúc trong `API_CONTRACT.md` mục 5.
+- Hiện api-service chỉ có `GET /products`. Nếu muốn load test có ghi dữ liệu, cần chuyển tiếp thêm `GET/PUT/DELETE /products/{id}` và `POST /products`. `DELETE` trả **204 không body**; `404` của catalogue nên chuyển nguyên 404 (code hiện tại đổi mọi lỗi HTTP thành 502).
+- Deployment api-service cần `resources.requests`, nếu không HPA của TV4 không tính được % CPU. Repo chưa có Deployment/Service của api-service, trong khi `ingress.yaml` và `hpa.yaml` đều đang trỏ vào chúng.
 
-### TV4 – ingress và monitoring
-- **Không** đưa catalogue-service ra Ingress. Chỉ `api-service:8000`.
-- ServiceMonitor chọn Service theo label `app: catalogue-service`, port tên `http`, path `/metrics`, namespace `shop`. Pod cũng có sẵn annotation `prometheus.io/scrape` nếu bạn dùng cấu hình kiểu annotation.
-- Tên metric và truy vấn PromQL mẫu: docs/contract.md mục 10.
-- HPA (`k8s/hpa.yaml`) chờ Metrics Server; Deployment đã có `resources.requests` nên HPA tính được % CPU.
+### TV3 (database, load test)
+- Catalogue kết nối theo đúng `database-statefulset.yaml`: `postgres-service:5432`, DB `catalogue_db`, user `postgres`. Đổi một trong các giá trị này thì báo TV2.
+- Bảng `products` do `init.sql` của TV3 tạo và là nguồn sự thật. Catalogue không sửa bảng, chỉ có câu `CREATE TABLE IF NOT EXISTS` giống hệt làm dự phòng. Đổi cấu trúc cột thì báo TV2 sửa `db.py`.
+- Nạp dữ liệu mẫu: lệnh seed ở mục 6. `--reset` xóa sạch rồi đánh lại id 1..N, nên script tải có thể chọn id ngẫu nhiên 1..500. Nếu không `--reset`, id bắt đầu sau 2 dòng mẫu của `init.sql`.
+- Script tải: coi `404` ở GET/PUT/DELETE theo id là hợp lệ khi có xóa. Ingress của TV4 đang giới hạn tốc độ (xem bên dưới), cần gỡ khi bắn tải.
 
-## 9. Quyết định TV2 tự đưa ra ngoài contract v1.0 (cần xác nhận)
+### TV4 (ingress, monitoring, HPA)
+- Catalogue **không** ra Ingress. Chỉ `api-service:8000`.
+- ServiceMonitor: namespace `default`, Service có label `app: catalogue-service`, port tên `http`, path `/metrics`. Pod cũng có annotation `prometheus.io/scrape`.
+- Metrics của catalogue và api-service dùng chung nhãn `route`, `status_code`, nên một bộ truy vấn PromQL dùng cho cả hai.
+- `ingress.yaml` đang có `limit-rps: "20"` và `limit-connections: "10"`: kịch bản Spike (300 user) sẽ bị NGINX từ chối gần hết, request không tới Pod nên HPA không scale. Cần gỡ hoặc nâng hạn mức trong lúc bắn tải.
+- Ingress đang trỏ `/` (Prefix) vào api-service nên `/metrics` của api-service cũng lộ ra ngoài, trong khi `API_CONTRACT.md` mục 8 yêu cầu hạn chế.
+- `catalogue-hpa.yaml` dùng cùng ngưỡng với `hpa.yaml`: min 2, max 10, CPU 70%.
 
-1. `DELETE` trả **204** (không body).
-2. `GET /products` hỗ trợ `limit` (mặc định 100, tối đa 1000) và `offset`; tổng số ở header `X-Total-Count`.
-3. Thêm `GET /ready` ngoài `GET /health`.
-4. Tên mẫu route trong metrics là `/products/{product_id}`.
-5. `name` được cắt khoảng trắng đầu/cuối; `price` và `stock` không được âm.
-6. Cho phép hai sản phẩm trùng tên.
+## 8. Đề xuất sửa `api-service/API_CONTRACT.md` (cần TV1 đồng ý)
+
+1. Mục 4: thêm `GET /ready`, `GET /metrics`, tham số `limit`/`offset`, header `X-Total-Count`, `DELETE` trả 204.
+2. Mục 2: PostgreSQL ghi 15 (đúng `postgres:15-alpine` của TV3).
+3. Mục 8: ghi chú catalogue dùng cùng bộ metric và loại `/health`, `/ready` khỏi thống kê.
+4. Ghi rõ namespace chung là `default`.

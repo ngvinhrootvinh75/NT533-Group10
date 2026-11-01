@@ -1,7 +1,7 @@
 """Cấu hình catalogue-service, đọc hoàn toàn từ biến môi trường.
 
-Tên biến bám theo docs/contract.md. Khi chạy trên Kubernetes, DB_NAME/DB_USER/DB_PASSWORD
-được lấy từ Secret `postgres-secret` (xem k8s/deployment.yaml).
+Giá trị mặc định khớp với k8s/database-statefulset.yaml của TV3
+(POSTGRES_DB=catalogue_db, POSTGRES_USER=postgres, Service postgres-service:5432).
 """
 
 import os
@@ -22,14 +22,15 @@ class Settings:
 
     db_host: str = os.getenv("DB_HOST", "postgres-service")
     db_port: int = _int("DB_PORT", 5432)
-    db_name: str = os.getenv("DB_NAME", "shopdb")
-    db_user: str = os.getenv("DB_USER", "shop")
+    db_name: str = os.getenv("DB_NAME", "catalogue_db")
+    db_user: str = os.getenv("DB_USER", "postgres")
     db_password: str = os.getenv("DB_PASSWORD", "")
 
     # Connection pool: mỗi Pod giữ tối đa db_pool_max kết nối tới PostgreSQL.
-    # Với HPA tối đa 8 Pod x 10 = 80 kết nối, thấp hơn max_connections mặc định (100) của PostgreSQL.
-    db_pool_min: int = _int("DB_POOL_MIN", 2)
-    db_pool_max: int = _int("DB_POOL_MAX", 10)
+    # HPA tối đa 10 Pod x 8 = 80 kết nối, dưới max_connections mặc định (100) của PostgreSQL.
+    # Khi tăng maxReplicas của HPA, phải giảm DB_POOL_MAX tương ứng (xem README).
+    db_pool_min: int = _int("DB_POOL_MIN", 1)
+    db_pool_max: int = _int("DB_POOL_MAX", 8)
     db_pool_timeout: int = _int("DB_POOL_TIMEOUT_SECONDS", 5)
 
     # Khi Pod khởi động trước DB, thử lại thay vì chết ngay.

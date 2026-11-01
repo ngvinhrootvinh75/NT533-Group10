@@ -1,0 +1,21 @@
+# HPA cho catalogue-service. Cùng ngưỡng với k8s/hpa.yaml của api-service (min 2, max 10, CPU 70%).
+# Cần Metrics Server đã chạy trong cụm: `kubectl top pods` phải trả về số liệu.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: catalogue-service-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: catalogue-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

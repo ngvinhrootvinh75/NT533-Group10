@@ -1,0 +1,54 @@
+# Chạy hệ thống ở máy local, không cần Kubernetes. Đặt ở thư mục gốc repo.
+#   docker compose up --build -d
+#   curl.exe http://localhost:8001/health        (PowerShell)  |  curl http://localhost:8001/health
+#
+# Cấu hình DB giống k8s/database-statefulset.yaml của TV3: postgres:15-alpine, DB catalogue_db,
+# user postgres, và nạp đúng file k8s/init.sql để schema local trùng schema trên cụm.
+# init.sql chỉ chạy khi volume còn trống. Muốn nạp lại từ đầu: docker compose down -v
+
+services:
+  postgres-service:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: catalogue_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123   # chỉ dùng local/thử nghiệm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./k8s/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d catalogue_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  catalogue-service:
+    build: ./catalogue-service
+    environment:
+      PORT: "8001"
+      DB_HOST: postgres-service
+      DB_PORT: "5432"
+      DB_NAME: catalogue_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres123
+      LOG_LEVEL: info
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres-service:
+        condition: service_healthy
+
+  # TV1: bỏ comment khi api-service có Dockerfile (repo chưa có).
+  # api-service:
+  #   build: ./api-service
+  #   environment:
+  #     CATALOGUE_BASE_URL: http://catalogue-service:8001
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - catalogue-service
+
+volumes:
+  postgres-data:

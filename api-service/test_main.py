@@ -76,4 +76,68 @@ def test_readiness():
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
-    assert response.json()["service"] == "api-service"
+    assert response.json()["service"] == "api-service"   
+     
+def test_products_catalogue_http_500(monkeypatch):
+    import httpx
+    import main
+    from fastapi.testclient import TestClient
+
+    real_async_client = httpx.AsyncClient
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            500,
+            json={"detail": "Internal Server Error"}
+        )
+    )
+
+    monkeypatch.setattr(
+        main.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=transport,
+            **kwargs
+        )
+    )
+
+    with TestClient(main.app) as client:
+        response = client.get("/products")
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Catalogue Service returned an error"
+    }
+
+
+def test_products_invalid_json(monkeypatch):
+    import httpx
+    import main
+    from fastapi.testclient import TestClient
+
+    real_async_client = httpx.AsyncClient
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            content=b"{invalid-json",
+            headers={"content-type": "application/json"}
+        )
+    )
+
+    monkeypatch.setattr(
+        main.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=transport,
+            **kwargs
+        )
+    )
+
+    with TestClient(main.app) as client:
+        response = client.get("/products")
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Invalid response from Catalogue Service"
+    }

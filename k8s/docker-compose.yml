@@ -1,0 +1,51 @@
+# Chạy toàn bộ hệ thống ở máy local, không cần Kubernetes.
+#   docker compose up --build
+#   curl http://localhost:8001/health
+# Tên service DB đặt là `postgres-service` để biến DB_HOST giống hệt môi trường Kubernetes.
+
+services:
+  postgres-service:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: shopdb
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop_local_password   # chỉ dùng local, KHÔNG dùng cho cụm thật
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shopdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  catalogue-service:
+    build: ./catalogue-service
+    environment:
+      PORT: "8001"
+      DB_HOST: postgres-service
+      DB_PORT: "5432"
+      DB_NAME: shopdb
+      DB_USER: shop
+      DB_PASSWORD: shop_local_password
+      LOG_LEVEL: info
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres-service:
+        condition: service_healthy
+
+  # TV1: bỏ comment khối dưới khi api-service đã có Dockerfile.
+  # api-service:
+  #   build: ./api-service
+  #   environment:
+  #     PORT: "8000"
+  #     CATALOGUE_BASE_URL: http://catalogue-service:8001
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - catalogue-service
+
+volumes:
+  postgres-data:

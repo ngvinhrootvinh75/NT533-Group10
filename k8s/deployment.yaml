@@ -1,0 +1,95 @@
+# Catalogue Service (stateless). Namespace `shop`.
+# Trước khi apply: thay DOCKERHUB_USER bằng tài khoản Docker Hub chung của nhóm, ví dụ
+#   sed -i 's#DOCKERHUB_USER#tenaccount#' k8s/deployment.yaml
+# Yêu cầu có sẵn: namespace `shop`, Secret `postgres-secret` (TV3), Service `postgres-service` (TV3).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogue-service
+  namespace: shop
+  labels:
+    app: catalogue-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: catalogue-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # Zero Downtime: không bao giờ bớt Pod cũ trước khi Pod mới Ready
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: catalogue-service
+      annotations:
+        # Dùng cho Prometheus cấu hình kiểu annotation; ServiceMonitor (TV4) chọn theo label của Service.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8001"
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: catalogue-service
+          image: DOCKERHUB_USER/catalogue-service:v0.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8001
+          env:
+            - name: PORT
+              value: "8001"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: DB_HOST
+              value: "postgres-service"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          resources:
+            # requests là BẮT BUỘC: HPA tính % CPU dựa trên giá trị này.
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # Khởi động chậm khi DB chưa sẵn sàng (service tự retry tới 60 giây) nên cần startupProbe.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health      # không chạm DB: mất DB không làm Pod bị restart
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready       # có kiểm tra DB: mất DB thì Pod bị rút khỏi Service
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2

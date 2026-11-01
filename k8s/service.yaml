@@ -1,0 +1,16 @@
+# Chỉ truy cập nội bộ trong cụm (ClusterIP). KHÔNG đưa catalogue-service ra Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalogue-service
+  namespace: shop
+  labels:
+    app: catalogue-service   # ServiceMonitor của TV4 chọn theo label này
+spec:
+  type: ClusterIP
+  selector:
+    app: catalogue-service
+  ports:
+    - name: http             # tên port bắt buộc là `http` để ServiceMonitor chọn đúng
+      port: 8001
+      targetPort: http

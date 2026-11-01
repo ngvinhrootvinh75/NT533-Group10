@@ -22,6 +22,14 @@ def health():
         "service": "api-service"
     }
 
+@app.get("/ready")
+def readiness():
+    return {
+        "status": "ready",
+        "service": "api-service"
+    }
+
+
 
 @app.get("/products")
 async def get_products():
@@ -31,7 +39,7 @@ async def get_products():
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(url)
             response.raise_for_status()
-            
+
             logger.info(
     "Catalogue Service responded with HTTP %s",
     response.status_code

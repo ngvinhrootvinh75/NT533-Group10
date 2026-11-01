@@ -69,3 +69,11 @@ def test_products_timeout(monkeypatch):
     response = client.get("/products")
 
     assert response.status_code == 504
+
+# Test 5: Readiness check
+def test_readiness():
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["service"] == "api-service"

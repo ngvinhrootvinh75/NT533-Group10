@@ -65,6 +65,21 @@ Nếu không có sản phẩm, trả về mảng rỗng `[]` và HTTP 200.
 
 Dữ liệu hiện tại là dữ liệu mẫu. Khi hoàn thiện tích hợp, API Service phải lấy dữ liệu thực từ Catalogue Service.
 
+### GET /ready
+
+Mục đích: Kiểm tra API Service sẵn sàng nhận request.
+
+HTTP Status: 200 OK
+
+Response:
+{
+  "status": "ready",
+  "service": "api-service"
+}
+
+Lưu ý: Readiness hiện tại chỉ kiểm tra API Service,
+chưa kiểm tra trạng thái Catalogue Service.
+
 ## 4. Catalogue Service Endpoints
 
 TV2 triển khai các endpoint sau:
@@ -103,6 +118,7 @@ Trường `created_at` được PostgreSQL quản lý, chưa bắt buộc trả 
 | Catalogue gặp lỗi nội bộ | 500 |
 | API không kết nối được Catalogue | 503 |
 | Catalogue phản hồi quá timeout | 504 |
+| Catalogue trả lỗi HTTP hoặc dữ liệu không hợp lệ | 502 |
 
 Định dạng lỗi thống nhất:
 

@@ -137,3 +137,36 @@ Trường `created_at` được PostgreSQL quản lý, chưa bắt buộc trả 
 - Catalogue Service truy cập PostgreSQL qua `postgres-service:5432` khi chạy trên Kubernetes.
 - API Service cần hỗ trợ logging, xử lý timeout và xuất Prometheus metrics tại `/metrics`.
 - Mọi thay đổi phá vỡ API Contract phải được thông báo và thống nhất trong nhóm trước khi áp dụng.
+
+## 8. Prometheus Metrics Convention
+
+API Service sử dụng prometheus-client để
+xuất các chỉ số tại endpoint GET /metrics.
+
+### Các Metrics
+
+1. http_requests_total
+   - Type: Counter
+   - Đếm tổng số HTTP request.
+   - Labels: method, route, status_code
+
+2. http_request_duration_seconds
+   - Type: Histogram
+   - Đo thời gian xử lý request (giây).
+   - Labels: method, route, status_code
+
+3. http_request_errors_total
+   - Type: Counter
+   - Đếm request có HTTP status >= 400.
+   - Labels: method, route, status_code
+
+### Quy ước
+
+- Endpoint: GET /metrics
+- API Service Port: 8000
+- Không tính request /metrics vào thống kê.
+- Các Metrics được cập nhật tự động bằng middleware.
+- CPU, RAM và Pod Count do hệ thống monitoring
+  Kubernetes thu thập.
+- Endpoint /metrics chỉ dành cho monitoring;
+  cần hạn chế truy cập công khai khi triển khai.
